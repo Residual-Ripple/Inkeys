@@ -255,6 +255,8 @@ namespace Inkeys::UI::PageControl
 			SIZE backingCapacity{ 1, 1 };
 			SIZE committedPresentationSize{};
 			SIZE committedBackingCapacity{};
+			// 上次真正提交的常量子 alpha；变化时必须整窗重传。
+			BYTE presentedConstantAlpha = 255;
 			std::uint64_t committedDeviceGeneration = 0;
 			bool committedPresentationReady = false;
 			bool forceFullPresentation = true;
@@ -1378,7 +1380,15 @@ namespace Inkeys::UI::PageControl
 				POINT destination{ presentationBounds.left, presentationBounds.top };
 				POINT sourcePoint{};
 				SIZE size{ static_cast<LONG>(width), static_cast<LONG>(height) };
-				BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+				// 「侧边栏不透明度」只作用于左右两侧翻页控件。
+				const int sidePercent = static_cast<int>(index) >= 2
+					? std::clamp(Inkeys::config.UI.PageControl.SideBarOpacityPercent.load(), 10, 100)
+					: 100;
+				const BYTE surfaceAlpha = static_cast<BYTE>(std::clamp(
+					std::lround(255.0 * sidePercent / 100.0), 0L, 255L));
+				// 常量子 alpha 变化必须整窗重传，脏区提交会让新旧 alpha 混在一张窗上。
+				const bool surfaceAlphaChanged = surfaceAlpha != state.presentedConstantAlpha;
+				BLENDFUNCTION blend{ AC_SRC_OVER, 0, surfaceAlpha, AC_SRC_ALPHA };
 				UPDATELAYEREDWINDOWINFO info{};
 				info.cbSize = sizeof(info);
 				info.pptDst = &destination;
@@ -1386,7 +1396,7 @@ namespace Inkeys::UI::PageControl
 				info.pptSrc = &sourcePoint;
 				info.hdcSrc = source;
 				info.pblend = &blend;
-				info.prcDirty = forceFullReplacement ? nullptr : &presentDirty;
+				info.prcDirty = (forceFullReplacement || surfaceAlphaChanged) ? nullptr : &presentDirty;
 				info.dwFlags = ULW_ALPHA;
 				if (diagnostics) diagnostics->ulwAttempted = true;
 				FrameStageTimer ulwTimer(diagnostics, FrameStage::ULW);
@@ -1399,6 +1409,7 @@ namespace Inkeys::UI::PageControl
 					presented = offscreenSink ? (*offscreenSink)(info)!=FALSE
 						: UpdateLayeredWindowIndirect(hwnd, &info) != FALSE;
 					if (!presented) ulwError = GetLastError();
+					else state.presentedConstantAlpha = surfaceAlpha;
 				}
 				ulwTimer.Stop();
 				// ULW 只读取源 DC；这里没有通过 GDI 修改像素。

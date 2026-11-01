@@ -1279,6 +1279,19 @@ namespace Inkeys::UI::Bar
 	export std::uint8_t CommittedPresentationAlpha() noexcept;
 	export std::uint8_t RequestedPresentationAlpha() noexcept;
 	export PresentationAlphaDiagnostics SnapshotPresentationAlphaDiagnostics() noexcept;
+	// 「仅在放映时显示」与整体不透明度：设置页写入后由这里统一重算并下发。
+	export void InitializePresentationVisibility() noexcept;
+	export void ApplyPresentationVisibility() noexcept;
+	export void ApplyBarOpacitySettings() noexcept;
+	export void InitializeBarTray() noexcept;
+	export void ShutdownBarTray() noexcept;
+	export bool HandleBarTrayMessage(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept;
+	export bool HandleBarTaskbarCreated() noexcept;
+	// 启动预览独占 alpha 通道，落地保存的不透明度要等它结束。
+	export void ScheduleBarOpacityApply() noexcept;
+	// 交互实现单元需要按同一组 ID 区分托盘回调与不透明度落地计时器。
+	export inline constexpr UINT BarTrayCallbackMessage = WM_APP + 0x4E2;
+	export inline constexpr UINT_PTR BarOpacityApplyTimerId = 0x494B4306;
 	export void SetAnimationOptions(bool enable, double speedRate);
 	export void SetEdgeLightingOptions(bool enable, bool dynamic);
 	export void SetDebugOptions(bool enable, bool showFrameRate);

@@ -260,6 +260,10 @@ namespace Inkeys::UI::Setting::Design
 		std::string shortcutGlobalStatus, shortcutHookStatus;
 		bool shortcutStatusWarning = false;
 		int settingEntryAnimation = 1;
+		// 常驻与不透明度：百分比存 10~100，写回时再落成整数配置。
+		bool onlyPresenting = false;
+		float barOpacity = 100.0F;
+		float sideBarOpacity = 100.0F;
 	};
 
 	struct GeneralEvents
@@ -283,6 +287,11 @@ namespace Inkeys::UI::Setting::Design
 		bool selectModeChanged = false, iconOrderChanged = false, expansionDirectionChanged = false;
 		std::array<bool, 4> autoCollapseChanged{};
 		std::array<bool, 6> shortcutsChanged{};
+		bool onlyPresentingChanged = false;
+		bool barOpacityChanged = false;
+		bool barOpacityActive = false;
+		bool sideBarOpacityChanged = false;
+		bool sideBarOpacityActive = false;
 	};
 
 	struct CicdContent

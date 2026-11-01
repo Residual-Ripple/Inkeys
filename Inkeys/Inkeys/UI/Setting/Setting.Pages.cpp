@@ -852,6 +852,18 @@ namespace Inkeys::UI::Setting::Design
 			SettingRow("bar-zoom", IA(I18nKey.SettingsUI.Regular.Appearance.BarZoom.N).c_str(),
 				IA(I18nKey.SettingsUI.Regular.Appearance.BarZoom.E).c_str(), "\ue9a6", sliderWidth, 32.0F,
 				[&](const LayoutRect& bounds) { events.barZoomChanged = SliderAction(bounds, draft.barZoom, 0.50F, 2.00F, events.barZoomActive); });
+
+			SectionHeader("常驻与不透明度");
+			events.onlyPresentingChanged = ToggleRow("only-presenting",
+				"仅在放映时显示工具栏",
+				"常态下隐藏悬浮工具栏，只在 WPS / PowerPoint 放映时出现；托盘图标始终可打开设置",
+				"\ue768", draft.onlyPresenting);
+			events.barOpacityChanged = SliderRow("bar-opacity",
+				"工具栏不透明度", "悬浮工具栏整体不透明度，图标与文字一起变淡",
+				"\ue9a6", draft.barOpacity, 10.0F, 100.0F, events.barOpacityActive, "%.0f%%");
+			events.sideBarOpacityChanged = SliderRow("sidebar-opacity",
+				"侧边栏不透明度", "放映时左右两侧翻页控件的不透明度",
+				"\ue9a6", draft.sideBarOpacity, 10.0F, 100.0F, events.sideBarOpacityActive, "%.0f%%");
 		}
 		if (section == GeneralSection::Interaction)
 		{

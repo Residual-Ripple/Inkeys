@@ -13,8 +13,14 @@ module;
 #include "Bar.MainLayoutPolicy.h"
 #include "Bar.PresentDecision.h"
 #include "Bar.PresentationProbe.h"
+#include "../../../resource.h"
+#include <algorithm>
+#include <cmath>
+#include <shellapi.h>
 #include <bit>
 #include <limits>
+
+#pragma comment(lib, "shell32.lib")
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -30,6 +36,9 @@ import Inkeys.UI.Bar.FramePacing;
 import Inkeys.UI.RenderPipeline;
 import Inkeys.Display;
 import Inkeys.Window;
+import Inkeys.UI.StartupPreview;
+import Inkeys.UI.Setting;
+import Inkeys.Other.Config;
 
 import <ranges>;
 
@@ -60,6 +69,22 @@ namespace
 	std::atomic<WorkspaceScene> committedChromeScene = WorkspaceScene::Desktop;
 	std::atomic_bool whiteboardBottomDockRequested = false;
 	std::atomic_bool whiteboardDockLockActive = false;
+
+	// 「仅放映时显示」与整体不透明度：只在设置/场次边沿改变，渲染每帧只读原子量。
+	constexpr UINT BarTrayIconId = 1;
+	constexpr UINT BarTrayMenuOpenSettings = 0x494B5001;
+	constexpr UINT BarTrayMenuOnlyPresenting = 0x494B5002;
+	constexpr UINT BarTrayMenuExit = 0x494B5003;
+
+	std::atomic_bool presentationVisibilityHidden = false;
+	std::atomic_bool trayReady = false;
+
+	[[nodiscard]] double ClampedBarOpacityPercent() noexcept
+	{
+		const int percent = Inkeys::config.UI.Bar.OpacityPercent.load();
+		return static_cast<double>(std::clamp(percent, 10, 100));
+	}
+
 }
 extern constexpr double BarButtonHoverFadeDur = BarButtonHoverFadeDurationSeconds;
 // Rendering 与 topology 共享同一组 module-linkage 常量，拆分后不复制数值。
@@ -417,7 +442,166 @@ namespace Inkeys::UI::Bar
 			barUISet.UpdateRendering(
 				contentStateUpdatesReady.load(std::memory_order_acquire));
 		}
+		// 场次边沿是「仅放映时显示」的唯一权威信号；窗口变化不改变显隐。
+		if (changed) ApplyPresentationVisibility();
 	}
+	void InitializePresentationVisibility() noexcept
+	{
+		// 启动阶段是否显示主栏由 Window.Legacy 按同一开关决定，这里对齐初始事实。
+		presentationVisibilityHidden.store(
+			Inkeys::config.UI.Bar.HideWhenNotPresenting.load(),
+			std::memory_order_release);
+	}
+
+	void ApplyPresentationVisibility() noexcept
+	{
+		// 只有场次边沿与设置写入会走到这里，命令幂等，重复下发不会闪窗。
+		const bool shouldHide = Inkeys::config.UI.Bar.HideWhenNotPresenting.load()
+			&& !PptPresentationActive();
+		if (presentationVisibilityHidden.exchange(shouldHide,
+			std::memory_order_acq_rel) == shouldHide) return;
+		auto& service = Inkeys::Window::GetService();
+		if (shouldHide)
+		{
+			(void)service.Hide(Inkeys::Window::WindowRole::Bar);
+			return;
+		}
+		(void)service.Show(Inkeys::Window::WindowRole::Bar);
+		barUISet.UpdateRendering(true);
+	}
+
+	void ApplyBarOpacitySettings() noexcept
+	{
+		// 整窗 alpha 由 StartupPreview 在启动阶段独占，这里不能抢。
+		if (Inkeys::UI::StartupPreview::ShouldBarStartTransparent()) return;
+		const double effective = std::clamp(ClampedBarOpacityPercent() / 100.0, 0.0, 1.0);
+		const auto alpha = static_cast<std::uint8_t>(
+			std::clamp(std::lround(effective * 255.0), 0L, 255L));
+		RequestPresentationAlpha(alpha);
+	}
+
+	void ScheduleBarOpacityApply() noexcept
+	{
+		// 只做一次延迟落地；启动预览结束后渲染线程可能已经休眠，需要计时器唤醒。
+		if (!floating_window || !IsWindow(floating_window)) return;
+		SetTimer(floating_window, BarOpacityApplyTimerId, 4000, nullptr);
+	}
+
+	namespace
+	{
+		[[nodiscard]] NOTIFYICONDATAW MakeTrayData(HWND owner, HICON icon) noexcept
+		{
+			NOTIFYICONDATAW data{};
+			data.cbSize = sizeof(data);
+			data.hWnd = owner;
+			data.uID = BarTrayIconId;
+			data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+			data.uCallbackMessage = BarTrayCallbackMessage;
+			data.hIcon = icon;
+			wcscpy_s(data.szTip, L"Inkeys");
+			return data;
+		}
+
+		void ExecuteTrayCommand(UINT command) noexcept
+		{
+			switch (command)
+			{
+			case BarTrayMenuOpenSettings:
+				Inkeys::UI::Setting::Toggle();
+				break;
+			case BarTrayMenuOnlyPresenting:
+			{
+				const bool next = !Inkeys::config.UI.Bar.HideWhenNotPresenting.load();
+				Inkeys::config.UI.Bar.HideWhenNotPresenting = next;
+				(void)Inkeys::config.Write();
+				ApplyPresentationVisibility();
+				break;
+			}
+			case BarTrayMenuExit:
+				CloseProgram();
+				break;
+			default:
+				break;
+			}
+		}
+
+		void ShowTrayMenu(HWND owner) noexcept
+		{
+			const HMENU menu = CreatePopupMenu();
+			if (!menu) return;
+			AppendMenuW(menu, MF_STRING, BarTrayMenuOpenSettings, L"打开设置");
+			AppendMenuW(menu, MF_STRING | (Inkeys::config.UI.Bar.HideWhenNotPresenting.load()
+				? MF_CHECKED : MF_UNCHECKED), BarTrayMenuOnlyPresenting, L"仅在放映时显示工具栏");
+			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+			AppendMenuW(menu, MF_STRING, BarTrayMenuExit, L"退出");
+			POINT cursor{};
+			GetCursorPos(&cursor);
+			// 托盘菜单必须先把 owner 提到前台，否则点击别处不会收起。
+			SetForegroundWindow(owner);
+			const UINT command = TrackPopupMenu(menu,
+				TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, cursor.x, cursor.y, 0, owner, nullptr);
+			DestroyMenu(menu);
+			PostMessageW(owner, WM_NULL, 0, 0);
+			if (command) ExecuteTrayCommand(command);
+		}
+	}
+
+	void InitializeBarTray() noexcept
+	{
+		if (trayReady.load(std::memory_order_acquire)) return;
+		if (!floating_window || !IsWindow(floating_window)) return;
+		HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
+			MAKEINTRESOURCEW(IDI_ICON1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED));
+		if (!icon) icon = LoadIconW(nullptr, IDI_APPLICATION);
+		auto data = MakeTrayData(floating_window, icon);
+		if (!Shell_NotifyIconW(NIM_ADD, &data))
+		{
+			if (IDTLogger) IDTLogger->warn("[托盘] 注册图标失败，错误码 {}", GetLastError());
+			return;
+		}
+		trayReady.store(true, std::memory_order_release);
+	}
+
+	void ShutdownBarTray() noexcept
+	{
+		if (!trayReady.exchange(false, std::memory_order_acq_rel)) return;
+		if (!floating_window || !IsWindow(floating_window)) return;
+		auto data = MakeTrayData(floating_window, nullptr);
+		(void)Shell_NotifyIconW(NIM_DELETE, &data);
+	}
+
+	bool HandleBarTrayMessage(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept
+	{
+		if (!trayReady.load(std::memory_order_acquire)) return false;
+		if (static_cast<UINT>(wParam) != BarTrayIconId) return false;
+		switch (static_cast<UINT>(lParam))
+		{
+		case WM_LBUTTONUP:
+		case WM_LBUTTONDBLCLK:
+			Inkeys::UI::Setting::Toggle();
+			return true;
+		case WM_RBUTTONUP:
+		case WM_CONTEXTMENU:
+			ShowTrayMenu(hwnd);
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	bool HandleBarTaskbarCreated() noexcept
+	{
+		// 资源管理器重启后托盘图标会丢失，需要按同一份数据重新注册。
+		if (!trayReady.load(std::memory_order_acquire)) return false;
+		if (!floating_window || !IsWindow(floating_window)) return false;
+		HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
+			MAKEINTRESOURCEW(IDI_ICON1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED));
+		if (!icon) icon = LoadIconW(nullptr, IDI_APPLICATION);
+		auto data = MakeTrayData(floating_window, icon);
+		(void)Shell_NotifyIconW(NIM_ADD, &data);
+		return true;
+	}
+
 	std::optional<bool> ConsumePptSceneTransition() noexcept
 	{
 		std::scoped_lock lock(pptSceneMutex);

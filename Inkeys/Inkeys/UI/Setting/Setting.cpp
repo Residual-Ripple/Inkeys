@@ -2146,6 +2146,8 @@ SettingSessionCoroutine RunSettingSession()
 		int SetSkinMode = setlist.SetSkinMode;
 		float BarZoom = static_cast<float>(Inkeys::config.UI.Bar.Zoom2.load());
 		bool BarZoomSavePending = false;
+		bool BarOpacitySavePending = false;
+		bool SideBarOpacitySavePending = false;
 
 		int TopSleepTime = setlist.topSleepTime;
 		bool RightClickClose = setlist.RightClickClose;
@@ -2278,10 +2280,13 @@ SettingSessionCoroutine RunSettingSession()
 		auto commitGeneralSliders = [&]()
 		{
 			// 导航可能使拖动控件下一帧不再渲染，离页时仍完成已有的释放保存合同。
-			if (BarZoomSavePending || Experimental.Inkeys3.AnimationSpeedSavePending)
+			if (BarZoomSavePending || Experimental.Inkeys3.AnimationSpeedSavePending
+				|| BarOpacitySavePending || SideBarOpacitySavePending)
 			{
 				QueueConfigWrite();
 				BarZoomSavePending = false;
+				BarOpacitySavePending = false;
+				SideBarOpacitySavePending = false;
 				Experimental.Inkeys3.AnimationSpeedSavePending = false;
 			}
 		};
@@ -3069,6 +3074,10 @@ SettingSessionCoroutine RunSettingSession()
 						static_cast<int>(Inkeys::UI::NormalizeStartupPlacement(Inkeys::config.UI.Bar.StartupPlacement.load())),
 						std::clamp(Inkeys::config.UI.Bar.UseTaskbarHeightAsScaleBase.load(), 0, 2) };
 					draft.settingEntryAnimation = setlist.settingEntryAnimation;
+					draft.onlyPresenting = Inkeys::config.UI.Bar.HideWhenNotPresenting.load();
+					draft.barOpacity = static_cast<float>(Inkeys::config.UI.Bar.OpacityPercent.load());
+					draft.sideBarOpacity = static_cast<float>(
+						Inkeys::config.UI.PageControl.SideBarOpacityPercent.load());
 					// 每帧冻结本页偏好，页面只产出事件，运行时通知仍留在既有 FIFO 业务域。
 					draft.selectMode = GetSelectAndClickThroughMode();
 					const int iconOrder = Inkeys::config.UI.Bar.IconOrder.load();
@@ -3198,6 +3207,40 @@ SettingSessionCoroutine RunSettingSession()
 						{
 							QueueConfigWrite();
 							BarZoomSavePending = false;
+						}
+						if (events.onlyPresentingChanged)
+						{
+							Inkeys::config.UI.Bar.HideWhenNotPresenting = draft.onlyPresenting;
+							// 立刻按新策略重算显隐，不能让用户等下一次放映边沿。
+							Inkeys::UI::Bar::ApplyPresentationVisibility();
+							QueueConfigWrite();
+						}
+						const int barOpacityPercent = static_cast<int>(draft.barOpacity + 0.5F);
+						if (barOpacityPercent != Inkeys::config.UI.Bar.OpacityPercent.load())
+						{
+							Inkeys::config.UI.Bar.OpacityPercent = barOpacityPercent;
+							Inkeys::UI::Bar::ApplyBarOpacitySettings();
+							BarOpacitySavePending = true;
+						}
+						if (!events.barOpacityActive && BarOpacitySavePending)
+						{
+							QueueConfigWrite();
+							BarOpacitySavePending = false;
+						}
+						const int sideBarOpacityPercent =
+							static_cast<int>(draft.sideBarOpacity + 0.5F);
+						if (sideBarOpacityPercent
+							!= Inkeys::config.UI.PageControl.SideBarOpacityPercent.load())
+						{
+							Inkeys::config.UI.PageControl.SideBarOpacityPercent = sideBarOpacityPercent;
+							// 四个分页面的常量子 alpha 变了，必须整窗重传。
+							Inkeys::UI::PageControl::NotifyLayoutChanged();
+							SideBarOpacitySavePending = true;
+						}
+						if (!events.sideBarOpacityActive && SideBarOpacitySavePending)
+						{
+							QueueConfigWrite();
+							SideBarOpacitySavePending = false;
 						}
 						Experimental.Inkeys3.EdgeLightingEnable = draft.edgeLighting;
 						if (events.edgeLightingChanged && Inkeys::config.Experimental.Inkeys3.UI3.EdgeLighting.Enable != draft.edgeLighting)

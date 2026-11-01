@@ -364,6 +364,11 @@ GROUP(UI, \
 				X(ConfigUploadMode::NoUpload, "NaN", ConfigSequence<BarFixedButtonLayoutEntry>, FixedButtonsA1, MakeDefaultFixedButtonsA1()) \
 				X(ConfigUploadMode::NoUpload, "NaN", ConfigSequence<BarExtensionButtonLayoutEntry>, ExtensionButtons, MakeDefaultExtensionButtons()) \
 				X(ConfigUploadMode::NoUpload, "NaN", ConfigSequence<BarFixedButtonLayoutEntry>, FixedButtonsA2, MakeDefaultFixedButtonsA2()) \
+				X(ConfigUploadMode::NoUpload, "NaN", IdtAtomic<bool>, HideWhenNotPresenting, false) \
+				X(ConfigUploadMode::NoUpload, "NaN", IdtAtomic<int>, OpacityPercent, 100) \
+			) \
+			GROUP(PageControl, \
+				X(ConfigUploadMode::NoUpload, "NaN", IdtAtomic<int>, SideBarOpacityPercent, 100) \
 			) \
 		) \
 	GROUP(Input, \

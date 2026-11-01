@@ -208,6 +208,10 @@ namespace Inkeys::UI::Bar
 		}
 		(void)Inkeys::Startup::Report(Inkeys::Startup::Milestone::BarComponentsReady);
 		SetContentStateUpdatesReady(true);
+		// 非放映时悬浮栏可能被设置隐藏，托盘是唯一的常驻入口，必须在这里就挂上。
+		InitializePresentationVisibility();
+		InitializeBarTray();
+		ScheduleBarOpacityApply();
 
 		barUISet.barState.PositionUpdate(barUISet.barStyle.zoom);
 		(void)Inkeys::Startup::Report(Inkeys::Startup::Milestone::BarStateReady);
@@ -268,6 +272,7 @@ namespace Inkeys::UI::Bar
 			Inkeys::UI::StartupPreview::SetBarStartupState(
 				Inkeys::UI::StartupPreview::BarStartupState::StoppedBeforeReady);
 		Inkeys::Business::ShutdownComponentActions();
+		ShutdownBarTray();
 
 		return;
 	}

@@ -2951,6 +2951,16 @@ LRESULT CALLBACK barWindowMsgCallback(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 		return 0;
 	}
 
+	// 资源管理器重启后系统会广播 TaskbarCreated，托盘图标需要按注册消息重挂。
+	{
+		static const UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+		if (taskbarCreated != 0 && msg == taskbarCreated)
+		{
+			(void)Inkeys::UI::Bar::HandleBarTaskbarCreated();
+			return 0;
+		}
+	}
+
 	if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
 		BarAutoCollapseNativeDownSerial.fetch_add(1, std::memory_order_acq_rel);
 
@@ -2971,8 +2981,21 @@ LRESULT CALLBACK barWindowMsgCallback(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 		return DefWindowProcW(hWnd, msg, wParam, lParam);
 	}
 
+	case Inkeys::UI::Bar::BarTrayCallbackMessage:
+	{
+		(void)Inkeys::UI::Bar::HandleBarTrayMessage(hWnd, wParam, lParam);
+		return 0;
+	}
+
 	case WM_TIMER:
 	{
+		if (wParam == Inkeys::UI::Bar::BarOpacityApplyTimerId)
+		{
+			// 启动预览结束后的唯一一次落地，之后只由设置页驱动。
+			KillTimer(hWnd, Inkeys::UI::Bar::BarOpacityApplyTimerId);
+			Inkeys::UI::Bar::ApplyBarOpacitySettings();
+			return 0;
+		}
 		if (wParam == BarBorderCursorGraceTimerId)
 		{
 			barUISet.HandleBorderCursorGraceTimeout(hWnd);

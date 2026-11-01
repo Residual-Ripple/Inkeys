@@ -3,6 +3,7 @@ import Inkeys.Window;
 import Inkeys.UI.MessageBox;
 import Inkeys.UI.StartupPreview;
 import Inkeys.Startup.Progress;
+import Inkeys.Other.Config;
 
 #include "Window.Legacy.hpp"
 
@@ -150,7 +151,9 @@ void TopWindow()
 	// Drawpad 已由 Draw3 首帧握手确认，显隐只能交给选择/内容状态机。
 	// 分页窗口由 PageControl 在布局和呈现提交后决定显隐；
 	// 启动阶段不能直接显示，否则初始矩形可能滞留在左上角。
-	(void)service.Show(Inkeys::Window::WindowRole::Bar);
+	// 开启「仅在放映时显示」时启动阶段就不显示主栏，之后由放映场次边沿自行拉起。
+	if (!Inkeys::config.UI.Bar.HideWhenNotPresenting.load())
+		(void)service.Show(Inkeys::Window::WindowRole::Bar);
 	while (rtsWait && !offSignal)
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	bool topmostRefreshFailureActive = false;
